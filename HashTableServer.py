@@ -20,6 +20,12 @@ class HashTableServer():
         self.host = socket.gethostname()
         self.port = 0
 
+        #machine information for next and prev nodes
+        self.prev = None
+        self.next = None
+        self.server_count = 0
+
+
         # set up timer for connecting to nameserver (still want to do 60 sec?)
 #        t = threading.Timer(60.0, self.find_nameserver)
 #        t.start()
@@ -43,6 +49,7 @@ class HashTableServer():
             "owner": "cgoodwi2",
             "port": self.port,
             "project": self.project_name,
+            "host": self.host,
         }
         self.message = json.dumps(self.message) # make it a string to send
 
@@ -66,23 +73,41 @@ class HashTableServer():
 
         self.nameservers = [] # list of all possible project nameservers
         for line in data:
-            if line['type'] == 'nameserver' and line['owner'] == 'jlee89':
+            if line['type'] == 'nameserver' and line['project'] == self.project_name.strip() + "-NS":
                 self.nameservers.append(line)
         
         # sort nameservers by last heard from
         self.nameservers = sorted(self.nameservers, key = lambda item: item['lastheardfrom'], reverse = True)
         
-        print('nameservers', self.nameservers)
+        #print('nameservers', self.nameservers)
         if len(self.nameservers) < 1:
             print("Unable to find nameserver, trying again...")
             return False
 
-        # just try to send info to each nameserver 
-        for name in self.nameservers:
-            try:
-                self.message_sock.sendto(bytes(self.message, 'utf-8'), (name['name'], name['port']))
-            except Exception as e:
-                print('unable to connect, exception', e)
+        # receive info from nameserver about next node, previous node, and server count
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            for name in self.nameservers:
+                try:
+                    s.connect((name['name'], name['port']))
+                    msg_len = str(len(str(self.message)))
+                    while len(msg_len) < 6:
+                        msg_len = '0' + msg_len
+                    s.sendall(bytes(msg_len, 'utf-8'))
+                    s.sendall(bytes(self.message, 'utf-8'))
+                    data = s.recv(6)
+                    data = s.recv(int(data))
+                    data = json.loads(data)
+
+                    self.prev = data['prev'].split(":")
+                    self.next = data['next'].split(":")
+                    self.server_count = data['server_count']
+
+                    if self.prev and self.next and self.server_count:
+                        print(self.prev, self.next, self.server_count)
+                        break
+
+                except Exception as e:
+                    print('unable to connect, exception', e)
 
     def checkpoint(self):
         current_id = 0 # keeps track of the last transaction id in the checkpoint

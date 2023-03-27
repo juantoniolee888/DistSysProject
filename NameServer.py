@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+
+
 import sys
 import socket
 import select
@@ -6,6 +9,7 @@ from json.decoder import JSONDecodeError
 import os
 import shutil
 import time
+import random
 
 
 #resend informtation to catalog.cse.nd.edu
@@ -48,6 +52,12 @@ def active_server(project_name):
     read_list = [server_socket]
     init_time = time.time_ns()
 
+    server_count = 0
+    server_list = {}
+
+    server_first = 0
+    server_last = 0
+
 
     update_info(project_name, port_number)
     print("Established Port on " + socket.gethostname() + ":" + str(port_number))
@@ -57,7 +67,48 @@ def active_server(project_name):
         if server_socket in readable:
             (clientsocket, address) = server_socket.accept()
             print('Connected with:', address[0] + ':' + str(address[1]))
-            clientsocket.close()
+            data = clientsocket.recv(6)
+            data = clientsocket.recv(int(data))
+            data = json.loads(data)
+
+            response = None
+            
+            if data['type'] == 'hashtableserver':
+                if server_count == 0:
+                    server_list[server_count] = {'host':data['host'], 'port':data['port']}
+                    node = server_list[server_first]['host'] + ":" + str(server_list[server_first]['port'])
+                    response = {'prev': node, 'next': node, 'server_count': server_count+1}
+                else:
+                    server_list[server_count] = {'host':data['host'], 'port':data['port']}
+                    next_node = server_list[server_first]['host'] + ":" + str(server_list[server_first]['port'])
+                    prev_node = server_list[server_last]['host'] + ":" + str(server_list[server_last]['port'])
+                    response = {'prev': prev_node, 'next': next_node, 'server_count': server_count+1}
+                server_last = server_count
+                server_count += 1
+
+            elif data['type'] == 'hashtableclient':
+                random_generated = []
+                response = {}
+                if server_count > 0:
+                    for i in range(0,3):
+                        if i < server_count:
+                            random_numbers = random.randint(0,server_count-1)  
+                            while random_numbers in random_generated:
+                                random_numbers = random.randint(0,server_count-1)
+                            random_generated.append(random_numbers)
+                            response[str(i)] = server_list[random_numbers]['host'] + ":" + str(server_list[random_numbers]['port'])
+                else:
+                    response['error'] = 'no server available'    
+    
+
+
+            if response:
+                msg_len = str(len(str(response)))
+                while len(msg_len) < 6:
+                    msg_len = '0' + msg_len    
+                clientsocket.sendall(bytes(str(msg_len),'utf-8'))
+                clientsocket.sendall(bytes(json.dumps(response), 'utf-8'))
+                clientsocket.close()
     
         if (time.time_ns() - init_time)/60000000000 >= 1:
             init_time = time.time_ns()
