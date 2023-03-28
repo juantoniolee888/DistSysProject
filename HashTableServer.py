@@ -7,6 +7,7 @@ import json
 import time
 import threading
 import http.client
+import random
 
 from HashTable import *
 
@@ -30,6 +31,8 @@ class HashTableServer():
 #        t = threading.Timer(60.0, self.find_nameserver)
 #        t.start()
         self.connect_to_nameserver()
+        self.checkpoint()
+        self.receive_from_client()
     
     # send server information to nameserver
     def connect_to_nameserver(self): 
@@ -148,26 +151,150 @@ class HashTableServer():
         self.transaction_count = 0 # compact the log every 100 transactions
         self.transaction_id = 0 # no transactions yet
 
+        while True:
+            read_sockets, write_sockets, error_sockets = select.select(self.connections, [], [])
+            socket = read_sockets[random.randrange(0, len(read_sockets))]
 
-#    def look_for_message(self):
+            if socket == self.server:
+                self.accept_new() # there is a new client to accept
+            else:
+                self.current_connection = socket
+                self.look_for_message()
+        self.server.close()
+
+    # accept new client: called when there is a new client ready to connect
+    def accept_new(self):
+        self.conn, self.address = self.server.accept()
+        self.connections.append(self.conn)
+        self.conn_received[self.conn] = ''
+
+        self.conn.settimeout(1)
+        self.current_connection = self.conn
+        self.look_for_message()
+
+
+    def look_for_message(self):
         # check if there is a message waiting
+        if self.current_connection:
+            try:
+                received_data = self.current_connection.recv(1024).decode('utf-8')
+            except Exception as e:
+                print("could not get more data due to:", e)
+                return
+            self.conn_received[self.current_connection] += received_data
+            if len(self.conn_received[self.current_connection]) > 0:
+                self.found_num = False
+                self.num = ''
+                self.count = 0
+                self.find_num() # find the number for the amount of data to look for
+                if not self.found_num:
+                    return # did not have enough data to even find the number of the length of the data
+                operation_len = self.count + int(self.num) # size of the string for the operation
+                if len(self.conn_received[self.current_connection]) >= operation_len:
+                    self.result = self.decode_json(self.conn_received[self.current_connection][self.count:operation_len])
+                    self.send_result()
+            # otherwise you need more data so just return
 
-#    def receive_info(self):
-        # loop to listen and see if either the client or another server has contacted it
+    def find_num(self):
+        while not self.found_num:
+            if self.count >= len(self.conn_received[self.current_connection]):
+                return
+            if self.conn_received[self.current_connection][self.count].isdigit():
+                self.num += self.conn_received[self.current_connection][self.count]
+                self.count += 1
+            else:
+                self.found_num = True
 
-#    def send_result(self):
+
+    def send_result(self):
         # given a result, send that information to the client
+        result_len = str(len(self.result))
+        try:
+            self.current_connection.sendall(bytes(result_len, 'utf-8') + bytes(self.result, 'utf-8'))
+        except (BrokenPipeError, ConnectionResetError) as e:
+            self.connections.remove(self.current_connection) # no longer active
+            return
+        self.conn_received[self.current_connection] = self.conn_received[self.current_connection][int(self.num)+self.count:]
 
         # if it's coming from a server you're done unless the key is wrong
         # final server destination in the string
         # if it's coming from a client give it to previous and next
 
-#    def decode_json(self, json_data):
+    def decode_json(self, json_data):
         # given json data from the client, decode and call resulting functions
+        self.data = json.loads(json_data)
+        if self.data['method'] == 'insert':
+            key = self.data['key']
+            value = self.data['value']
+            result = self.hash_table.insert(key,value)
+            if result == 'inserted': # based on result in the hash table
+                log = open('table.txn', 'a')
+                log.write(json.dumps({'method':'insert', 'key':key,'value':value, 'id':self.transaction_id}))
+                log.write('\n') # to show end of this log value
+                log.flush()
+                os.sync()
+                log.close()
+                json_result = json.dumps({"success":"true", "inserted":"true"})
+            elif result =='key already in table': # does not need to be written to log
+                json_result = json.dumps({"success":"true", "inserted":"false"})
+            else: # result = None
+                json_result = json.dumps({"success":"false", "error":"key already in hash table", "key_title":key})
+        elif self.data['method'] == 'lookup':
+            key = self.data['key']
+            result = self.hash_table.lookup(key)
+            if result:
+                json_result = json.dumps({"success":"true", "value":result})
+            else:
+                json_result = json.dumps({"success":"false", "error":"key not in table"})
+        elif self.data['method'] == 'remove':
+            key = self.data['key']
+            result = self.hash_table.remove(key)
+            if result:
+                json_result = json.dumps({"success":"true", "removed":"true"})
+                log = open('table.txn', 'a')
+                log.write(json.dumps({"method":"remove", "key":key, "id":self.transaction_id}))
+                log.write("\n")
+                log.flush()
+                os.sync()
+                log.close()
+            else:
+                json_result = json.dumps({"success":"true", "removed":"false"}) # key not in table already
+        elif self.data['method'] == 'size':
+            result = self.hash_table.size()
+            if result:
+                json_result = json.dumps({"success":"true", "size":result})
+            else:
+                json_result = json.dumps({"success":"false", "error":"size failure"})
+        elif self.data['method'] == 'query':
+            subkey = self.data['subkey']
+            subvalue = self.data['subvalue']
+            result = self.hash_table.query(subkey, subvalue)
+            if result:
+                json_result = json.dumps({"success":"true", "values":result})
+            else:
+                json_result = json.dumps({"success":"false", "error":"no matches found"})
+        self.transaction_count += 1
+        if self.transaction_count >= 100:
+            self.transaction_count = 0
+            self.backup_table()
+        self.transaction_id += 1
+        return json_result
 
-#    def backup_table(self):
+
+    def backup_table(self):
         # given the current table, write to checkpoint and delete log
+        backup = os.open('backup.ckpt', os.O_WRONLY|os.O_FSYNC|os.O_CREAT)
+        for key in self.hash_table.hash_table:
+            os.write(backup, str.encode(json.dumps({"key":key, "value":self.hash_table.hash_table[key], "id": self.transaction_id})))
+            os.write(backup, str.encode("\n"))
+        os.renmae('backup.ckpt', 'table.ckpt')
 
+        os.fsync(backup)
+        os.close(backup)
+        try:
+            os.remove('table.txn')
+        except FileNotFoundError:
+            pass
 
 def main():
     if len(sys.argv) != 2:
