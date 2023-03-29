@@ -106,11 +106,56 @@ class HashTableServer():
                     self.server_count = data['server_count']
 
                     if self.prev and self.next and self.server_count:
-                        print(self.prev, self.next, self.server_count)
+                        if self.server_count > 1:
+                            self.update_chord_circles()
                         break
 
                 except Exception as e:
                     print('unable to connect, exception', e)
+
+    def update_chord_circles(self): #updates for fixing total number of servers (for hashing), and update its neighbors previous and next node information 
+        msg = {'method':'update_neighbors', 'machine':self.host + ':' + str(self.port), 'type':'prev'} #send the new next its new prev (self)
+        self.send_update_neighbors_msg(msg)
+        msg['type'] = 'next'    #send msg to inform the new previous that this host is its next
+        self.send_update_neighbors_msg(msg)
+
+        inform_machine = None
+        self_next_node = self.next
+        
+        msg = {'method':'update_server_count', 'machine':self.host + ':' + str(self.port), 'count':str(self.server_count), 'type':'prev'}
+        while inform_machine != self.host + ":" + str(self.port): #individually go to each node and tell it to update
+            inform_machine = self.send_update_neighbors_msg(msg)
+            self.next = inform_machine.split(":")
+        self.next = self_next_node
+
+    def send_update_neighbors_msg(self, msg): #little mini sender and receiver for the setup msgs
+        if msg['type'] == 'prev':
+            host = self.next[0]
+            port = int(self.next[1])
+        elif msg['type'] == 'next':
+            host = self.prev[0]
+            port = int(self.prev[1])
+        next_machine = None
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.connect((host, port))
+                result_len = str(len(str(msg)))
+                s.sendall(bytes(result_len, 'utf-8') + bytes(json.dumps(msg), 'utf-8'))
+                data = str(s.recv(1024)).strip("'b")
+                count = ''
+                while data[0] != '{':
+                    count += data[0]
+                    data = data[1:]
+                if int(count) == len(data):
+                    data = json.loads(data)
+                    if 'success' not in data or data['success'] == 'false':
+                        self.send_update_msg(msg)
+                    if 'next_machine' in data:
+                        next_machine = data['next_machine']
+            except Exception as e:
+                    print('unable to connect, exception', e)
+        return next_machine
 
     def checkpoint(self):
         current_id = 0 # keeps track of the last transaction id in the checkpoint
@@ -273,6 +318,23 @@ class HashTableServer():
                 json_result = json.dumps({"success":"true", "values":result})
             else:
                 json_result = json.dumps({"success":"false", "error":"no matches found"})
+        elif self.data['method'] == 'update_neighbors': #fixing previous whenever a new node is accessed
+            if 'machine' in self.data and 'type' in self.data:
+                if self.data['type'] == 'prev':
+                    self.prev = self.data['machine'].split(':')
+                elif self.data['type'] == 'next':
+                    self.next = self.data['machine'].split(':')
+                json_result = json.dumps({"success":"true"})
+            else:
+                json_result = json.dumps({"success":"false", "error":"not correct information"})
+        elif self.data['method'] == 'update_server_count':
+            if 'count' in self.data and 'type' in self.data:
+                if int(self.data['count']) > self.server_count:
+                    self.server_count = int(self.data['count'])
+                json_result = json.dumps({"success":"true", "next_machine": self.next[0] + ":" + str(self.next[1])})
+            else:
+                json_result = json.dumps({"success":"false", "error":"not correct information"})
+
         self.transaction_count += 1
         if self.transaction_count >= 100:
             self.transaction_count = 0
