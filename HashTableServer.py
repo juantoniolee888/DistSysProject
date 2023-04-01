@@ -339,17 +339,18 @@ class HashTableServer():
         if self.transaction_count >= 100:
             self.transaction_count = 0
             self.backup_table()
+
         self.transaction_id += 1
         return json_result
 
 
     def backup_table(self):
         # given the current table, write to checkpoint and delete log
-        backup = os.open('backup.ckpt', os.O_WRONLY|os.O_FSYNC|os.O_CREAT)
+        backup = os.open('backup.ckpt', os.O_WRONLY|os.O_CREAT)
         for key in self.hash_table.hash_table:
             os.write(backup, str.encode(json.dumps({"key":key, "value":self.hash_table.hash_table[key], "id": self.transaction_id})))
             os.write(backup, str.encode("\n"))
-        os.renmae('backup.ckpt', 'table.ckpt')
+        os.rename('backup.ckpt', 'table.ckpt')
 
         os.fsync(backup)
         os.close(backup)
