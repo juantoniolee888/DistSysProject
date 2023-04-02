@@ -95,6 +95,7 @@ class HashTableClient():
         # make JSON for inserting key/value
         client_stub = json.dumps({"method":"insert", "key":key, "value":value})
         response = self.send_and_wait(client_stub)
+        print("response", response)
         if response["success"] == "true":
             return "success"
         else:
@@ -159,8 +160,9 @@ class HashTableClient():
         try:
             response = json.loads(response)
             return response
-        except Exception: # if unable to load it as json, just return the response
+        except Exception as e: # if unable to load it as json, just return the response
             return response 
+            
 
     # receives data & makes sure it has the full message before returning
     def wait_for_response(self):

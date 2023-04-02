@@ -25,6 +25,7 @@ class HashTableServer():
         self.prev = None
         self.next = None
         self.server_count = 0
+        self.total_keys = 1000
 
 
         # set up timer for connecting to nameserver (still want to do 60 sec?)
@@ -104,6 +105,14 @@ class HashTableServer():
                     self.prev = data['prev'].split(":")
                     self.next = data['next'].split(":")
                     self.server_count = data['server_count']
+                    # give each server an id so you can figure out the keys it"s responsible for
+                    self.server_id = self.server_count
+                    self.higher_key = (self.total_keys/self.server_count)*self.server_id
+                    self.lower_key = self.higher_key - (self.total_keys/self.server_count)
+
+                    self.higher_key = int(self.higher_key)
+                    self.lower_key = int(self.lower_key)
+                    print("LOWER KEY1:", self.lower_key, "HIGHER KEY1:", self.higher_key)
 
                     if self.prev and self.next and self.server_count:
                         if self.server_count > 1:
@@ -265,9 +274,77 @@ class HashTableServer():
         # final server destination in the string
         # if it's coming from a client give it to previous and next
 
+    # hash the key given so that you know what server it belongs to
+    def hash_key(self, key):
+        sum_val = 0
+        for letter in key:
+            sum_val += ord(letter)
+        key_hash = sum_val % self.total_keys
+        return key_hash
+
+    def get_response_from_server(self):
+        try:
+            received_data = self.send_socket.recv(1024).decode("utf-8")
+        except Exception as e:
+            print("get response from server error", e)
+            return json.loads(str({"success":"false", "error":"server communication"}))
+
+        if len(received_data) > 0:
+            found_num = False
+            num = ''
+            count = 0
+            while not found_num:
+                while count >= len(received_data):
+                    received_data += self.send_socket.recv(1024).decode('utf-8')
+                if received_data[count].isdigit():
+                    num += received_data[count]
+                    count += 1
+                else:
+                    found_num = True
+        operation_len = count + int(num)
+        while len(received_data) < operation_len:
+            received_data += self.send_socket.recv(1024).decode('utf-8')
+        if len(received_data) >= operation_len:
+            return json.loads(received_data[count:])
+
     def decode_json(self, json_data):
         # given json data from the client, decode and call resulting functions
         self.data = json.loads(json_data)
+        
+        # make sure the keys are still right
+        self.higher_key = (self.total_keys/self.server_count) * self.server_id
+        self.lower_key = self.higher_key - (self.total_keys/self.server_count)
+        self.higher_key = int(self.higher_key)
+        self.lower_key = int(self.lower_key)
+        print('updating keys', self.lower_key, '-', self.higher_key)
+
+        # if method is insert/remove/lookup you need to make sure the key value is correct
+        if self.data['method'] == 'insert' or self.data['method'] == 'remove' or self.data['method'] == 'lookup':
+            self.key_num = self.hash_key(self.data['key'])
+            print("key value", self.key_num)
+            if self.key_num < self.lower_key or self.key_num >= self.higher_key:
+                # needs to be passed along
+                length = str(len(json_data))
+                self.send_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                if self.key_num < self.lower_key: # needs to be passed to previous
+                    # pass key to previous
+                    self.send_socket.connect((self.prev[0], int(self.prev[1])))
+                else: # self.key_num is too high --> needs to be passed to next
+                    # pass key to next
+                    self.send_socket.connect((self.next[0], int(self.next[1])))
+                self.send_socket.sendall(bytes(length, 'utf-8') + bytes(json_data, 'utf-8'))
+                try:
+                    value = self.get_response_from_server()
+                    try:
+                        value = json.dumps(value)
+                        return value
+                    except Exception as e:
+                        print('exception', e)
+                        return value
+                except Exception as e:
+                    print('could not receive data due to', e)
+
+
         if self.data['method'] == 'insert':
             key = self.data['key']
             value = self.data['value']

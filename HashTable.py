@@ -10,10 +10,10 @@ class HashTable():
     def insert(self, key,value):
         if  key not in self.hash_table:
             self.hash_table[key] = value
-            return 'inserted'
+            return "inserted"
         else:
             if self.hash_table[key] == value:
-                return 'key already in table'
+                return "key already in table"
             else:
                 return None
 
@@ -27,7 +27,7 @@ class HashTable():
     def remove(self, key):
         if key in self.hash_table:
             del self.hash_table[key]
-            return 'removed'
+            return "removed"
         else:
             return None
     
