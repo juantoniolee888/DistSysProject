@@ -93,7 +93,8 @@ class HashTableClient():
         if key == None or value == None: # user did not pass enough values
             return {'error': 'not enough input'}
         # make JSON for inserting key/value
-        client_stub = json.dumps({"method":"insert", "key":key, "value":value})
+        # include backup so that the server knows the data still needs to be backed up
+        client_stub = json.dumps({"method":"insert", "key":key, "value":value, "backup": False})
         response = self.send_and_wait(client_stub)
         print("response", response)
         if response["success"] == "true":
@@ -105,7 +106,7 @@ class HashTableClient():
         if key == None:
             return {'error': 'not enough input'}
         # make JSON for lookup
-        client_stub = json.dumps({"method":"lookup", "key":key})
+        client_stub = json.dumps({"method":"lookup", "key":key, "backup": False})
         response = self.send_and_wait(client_stub)
         if response["success"] == "true":
             return response["value"]
@@ -116,7 +117,7 @@ class HashTableClient():
         if key == None:
             return {'error': 'not enough input'}
         # make JSON for remove
-        client_stub = json.dumps({"method":"remove", "key":key})
+        client_stub = json.dumps({"method":"remove", "key":key, "backup": False})
         response = self.send_and_wait(client_stub)
         if response["success"] == "true":
             return "success"
@@ -125,7 +126,7 @@ class HashTableClient():
 
     def size(self):
         # make JSON for size
-        client_stub = json.dumps({"method":"size"})
+        client_stub = json.dumps({"method":"size", "backup": False})
         response = self.send_and_wait(client_stub)
         if response["success"] == "true":
             return response["size"]
@@ -136,7 +137,7 @@ class HashTableClient():
         if subkey == None or subvalue == None:
             return {'error': 'not enough input'}
         # make JSON for query
-        client_stub = json.dumps({"method":"query", "subkey":subkey, "subvalue":subvalue})
+        client_stub = json.dumps({"method":"query", "subkey":subkey, "subvalue":subvalue, "backup": False})
         response = self.send_and_wait(client_stub)
         if response["success"] == "true":
             return response["values"]
