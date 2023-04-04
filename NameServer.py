@@ -42,6 +42,37 @@ def setup_port():
     server_socket.listen(5)
     return (server_socket, port_number)
 
+def check_status(server_list, self_id, direction):
+    connection_count = 0
+    test_server = server_list[self_id][direction]
+
+    dead_server = []
+    live_server = -1
+
+
+
+    message = json.dumps({'method':'server_alive'})
+    while not connection_count and test_server != self_id:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.connect((server_list[test_server]['host'], server_list[test_server]['port']))
+                msg_len = str(len(str(message)))
+                s.sendall(bytes(msg_len, 'utf-8'))
+                s.sendall(bytes(message, 'utf-8'))
+                data = str(s.recv(1024))
+                live_server = test_server
+                
+            except (socket.timeout, ConnectionRefusedError) as e:
+                dead_server.append(test_server)
+                test_server = server_list[test_server][direction]
+
+    if live_server == -1:
+        live_server = self_id
+    return dead_server, live_server
+                
+                
+ 
+
 # main running program of the server
 def active_server(project_name):
     server_socket = setup_port()
@@ -54,6 +85,7 @@ def active_server(project_name):
 
     server_count = 0
     server_list = {}
+    responsibility_list = {}
 
     server_first = 0
     server_last = 0
@@ -72,19 +104,25 @@ def active_server(project_name):
             data = json.loads(data)
 
             response = None
-            
+
             if data['type'] == 'hashtableserver':
                 if server_count == 0:
-                    server_list[server_count] = {'host':data['host'], 'port':data['port']}
+                    server_list[server_count] = {'host':data['host'], 'port':data['port'], 'prev':0, 'next':0}
                     node = server_list[server_first]['host'] + ":" + str(server_list[server_first]['port'])
                     response = {'prev': node, 'next': node, 'server_count': server_count+1}
                 else:
-                    server_list[server_count] = {'host':data['host'], 'port':data['port']}
+                    server_list[server_count] = {'host':data['host'], 'port':data['port'], 'prev':server_last, 'next':server_first}
+                    server_list[server_first]['prev'] = server_count
+                    server_list[server_last]['next'] = server_count
                     next_node = server_list[server_first]['host'] + ":" + str(server_list[server_first]['port'])
                     prev_node = server_list[server_last]['host'] + ":" + str(server_list[server_last]['port'])
                     response = {'prev': prev_node, 'next': next_node, 'server_count': server_count+1}
+
+                
+                responsibility_list[server_count] = server_count
                 server_last = server_count
                 server_count += 1
+                print(server_list)
 
             elif data['type'] == 'hashtableclient':
                 random_generated = []
@@ -97,8 +135,22 @@ def active_server(project_name):
                                 random_numbers = random.randint(0,server_count-1)
                             random_generated.append(random_numbers)
                             response[str(i)] = server_list[random_numbers]['host'] + ":" + str(server_list[random_numbers]['port'])
-                else:
-                    response['error'] = 'no server available'    
+
+            elif data['type'] == 'hashtableserver-neighbor_error':
+                dead_server, live_server = check_status(server_list, data['self-id'], data['direction'])
+                for server in dead_server:
+                    responsibility_list[server] = data['self-id']
+                server_list[data['self-id']][data['direction']] = live_server
+                if server_first in dead_server:
+                    server_first = data['self-id']
+                if server_last in dead_server:
+                    server_last = data['self-id']
+
+                
+                response = {'change':server_list[live_server]['host']+":"+str(server_list[live_server]['port']), 'direction':data['direction'], 'replace':','.join([str(x) for x in dead_server])}
+                print(response)
+            else:
+                response['error'] = 'no server available'    
     
 
 

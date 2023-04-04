@@ -25,6 +25,9 @@ class HashTableServer():
         self.prev = None
         self.next = None
         self.server_count = 0
+        self.id = -1
+        self.responsibilities = []
+
         self.total_keys = 1000
 
 
@@ -105,6 +108,9 @@ class HashTableServer():
                     self.prev = data['prev'].split(":")
                     self.next = data['next'].split(":")
                     self.server_count = data['server_count']
+                    self.id = self.server_count - 1
+
+
                     # give each server an id so you can figure out the keys it"s responsible for
                     self.server_id = self.server_count
                     self.higher_key = (self.total_keys/self.server_count)*self.server_id
@@ -115,6 +121,9 @@ class HashTableServer():
                     print("LOWER KEY1:", self.lower_key, "HIGHER KEY1:", self.higher_key)
 
                     if self.prev and self.next and self.server_count:
+
+                        self.ns_hostname = name['name']
+                        self.ns_port = name['port']
                         if self.server_count > 1:
                             self.update_chord_circles()
                         break
@@ -336,12 +345,19 @@ class HashTableServer():
                 # needs to be passed along
                 length = str(len(json_data))
                 self.send_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.send_socket.settimeout(2)
                 if self.key_num < self.lower_key: # needs to be passed to previous
                     # pass key to previous
-                    self.send_socket.connect((self.prev[0], int(self.prev[1])))
+                        try:
+                            self.send_socket.connect((self.prev[0], int(self.prev[1])))
+                        except ConnectionRefusedError as e:
+                            print("TIMEOUT")
                 else: # self.key_num is too high --> needs to be passed to next
                     # pass key to next
-                    self.send_socket.connect((self.next[0], int(self.next[1])))
+                    try:
+                        self.send_socket.connect((self.next[0], int(self.next[1])))
+                    except ConnectionRefusedError as e:
+                        print("TIMEOUT")
                 self.send_socket.sendall(bytes(length, 'utf-8') + bytes(json_data, 'utf-8'))
                 try:
                     value = self.get_response_from_server()
@@ -431,6 +447,55 @@ class HashTableServer():
         return json_result
 
     # checks if you need to send backup messages
+
+    def stabilization(self, direction):
+        if direction == 'next':
+            if self.next[0] + ":" + str(self.next[1]) == self.host + ":" + str(self.port):
+                return False
+            connection_tuple = (self.next[0], int(self.next[1]))
+        else:
+            if self.prev[0] + ":" + str(self.prev[1]) == self.host + ":" + str(self.port):
+                return False
+            connection_tuple = (self.prev[0], int(self.prev[1]))
+
+        try:
+            self.send_socket.connect(connection_tuple)
+            return True
+        except (socket.timeout, ConnectionRefusedError) as e:
+            message = json.dumps({'type':'hashtableserver-neighbor_error','self-id':self.id, 'direction':direction})
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                try:
+                    s.connect((self.ns_hostname, self.ns_port))
+                    msg_len = str(len(str(message)))
+                    while len(msg_len) < 6:
+                        msg_len = '0' + msg_len
+                    s.sendall(bytes(msg_len, 'utf-8'))
+                    s.sendall(bytes(message, 'utf-8'))
+                    data = s.recv(6)
+                    data = s.recv(int(data))
+                    data = json.loads(data)
+
+                    for server in data['replace'].split(','):
+                        if server not in self.responsibilities:
+                            self.responsibilities.append(int(server))
+
+                    if direction == 'next':
+                        self.next = data['change'].split(':')
+                        if self.next[0] + ":" + str(self.next[1]) != self.host + ":" + str(self.port):
+                            return self.stabilization('next')
+                    else:
+                        self.prev = data['change'].split(':')
+                        if self.prev[0] + ":" + str(self.prev[1]) != self.host + ":" + str(self.port):
+                            return self.stabilization('prev')
+
+                    
+                except Exception as e:
+                    print('unable to connect, exception', e)
+                    return False
+
+
+        
+    
     def check_backup(self):
         if self.data['backup']:
             return
@@ -442,14 +507,16 @@ class HashTableServer():
                 length = str(len(str_data))
                 self.send_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 # start by sending to next socket
-                self.send_socket.connect((self.next[0], int(self.next[1])))
-                self.send_socket.sendall(bytes(length, 'utf-8') + bytes(str_data, 'utf-8'))
-              #  value = self.get_response_from_server()
-              #  print('VALUE:', value)
-                self.send_socket.close()
+                if self.stabilization('next'):
+                    self.send_socket.sendall(bytes(length, 'utf-8') + bytes(str_data, 'utf-8'))
+                    #  value = self.get_response_from_server()
+                    #  print('VALUE:', value)
+                    self.send_socket.close()
+                
                 self.send_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.send_socket.connect((self.prev[0], int(self.prev[1])))
-                self.send_socket.sendall(bytes(length, 'utf-8') + bytes(str_data, 'utf-8'))
+                if self.stabilization('prev'):
+                    #self.send_socket.connect((self.prev[0], int(self.prev[1])))
+                    self.send_socket.sendall(bytes(length, 'utf-8') + bytes(str_data, 'utf-8'))
               #  value2 = self.get_response_from_server()
               #  print('VALUE2:', value)
                 
