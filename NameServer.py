@@ -106,22 +106,66 @@ def active_server(project_name):
             response = None
 
             if data['type'] == 'hashtableserver':
-                if server_count == 0:
-                    server_list[server_count] = {'host':data['host'], 'port':data['port'], 'prev':0, 'next':0}
-                    node = server_list[server_first]['host'] + ":" + str(server_list[server_first]['port'])
-                    response = {'prev': node, 'next': node, 'server_count': server_count+1}
-                else:
-                    server_list[server_count] = {'host':data['host'], 'port':data['port'], 'prev':server_last, 'next':server_first}
-                    server_list[server_first]['prev'] = server_count
-                    server_list[server_last]['next'] = server_count
-                    next_node = server_list[server_first]['host'] + ":" + str(server_list[server_first]['port'])
-                    prev_node = server_list[server_last]['host'] + ":" + str(server_list[server_last]['port'])
-                    response = {'prev': prev_node, 'next': next_node, 'server_count': server_count+1}
+                if 'self-id' in data:
+                    direction = 'next'
 
-                
-                responsibility_list[server_count] = server_count
-                server_last = server_count
-                server_count += 1
+                    server_list[int(data['self-id'])]['host'] = data['host']
+                    server_list[int(data['self-id'])]['port'] = data['port']
+
+                    maintaining_server = responsibility_list[int(data['self-id'])]
+                    take_over_responsibilities = False
+
+                    if int(maintaining_server) != int(data['self-id']):
+                        if int(maintaining_server) == int(data['self-id'])-1 or int(maintaining_server) == int(data['self-id'])+1:
+                            take_over_responsibilities = True
+
+                        if int(maintaining_server) < int(data['self-id']):
+                            server_prev = server_list[int(maintaining_server)]
+                            server_next = server_list[server_list[int(maintaining_server)]['next']]
+                        elif int(maintaining_server) > int(data['self-id']):
+                            server_prev = server_list[server_list[int(maintaining_server)]['prev']]
+                            server_next = server_list[int(maintaining_server)]
+   
+                        print("'", server_prev, server_next, '"')
+                        prev_node = server_prev['host'] + ":" + str(server_prev['port'])
+                        next_node = server_next['host'] + ":" + str(server_next['port'])
+                        response = {'prev': prev_node, 'next': next_node, 'server_count': server_count}
+
+
+                        responsibility_list[int(data['self-id'])] = int(data['self-id'])
+
+                        if take_over_responsibilities:
+                            take_over = []
+                            for key, value in responsibility_list.items():
+                                if int(value) == int(maintaining_server):
+                                    take_over.append(key)
+                            for key in take_over:
+                                responsibility_list[key] = int(data['self-id'])
+                            response['responsibilities'] = ','.join([str(x) for x in take_over])
+                    else:    
+                        server_prev = server_list[int(maintaining_server)]['prev']
+                        server_next = server_list[int(maintaining_server)]['next']
+   
+                        prev_node = server_list[server_prev]['host'] + ":" + str(server_list[server_prev]['port'])
+                        next_node = server_list[server_next]['host'] + ":" + str(server_list[server_next]['port'])
+                        response = {'prev': prev_node, 'next': next_node, 'server_count': server_count}
+                else:
+                    if server_count == 0:
+                        server_list[server_count] = {'host':data['host'], 'port':data['port'], 'prev':0, 'next':0}
+                        node = server_list[server_first]['host'] + ":" + str(server_list[server_first]['port'])
+                        response = {'prev': node, 'next': node, 'server_count': server_count+1}
+                    else:
+                        server_list[server_count] = {'host':data['host'], 'port':data['port'], 'prev':server_last, 'next':server_first}
+                        server_list[server_first]['prev'] = server_count
+                        server_list[server_last]['next'] = server_count
+                        next_node = server_list[server_first]['host'] + ":" + str(server_list[server_first]['port'])
+                        prev_node = server_list[server_last]['host'] + ":" + str(server_list[server_last]['port'])
+                        response = {'prev': prev_node, 'next': next_node, 'server_count': server_count+1}
+   
+                    responsibility_list[server_count] = server_count
+
+                    server_last = server_count
+                    server_count += 1
                 print(server_list)
 
             elif data['type'] == 'hashtableclient':

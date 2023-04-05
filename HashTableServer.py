@@ -58,6 +58,8 @@ class HashTableServer():
             "project": self.project_name,
             "host": self.host,
         }
+
+        self.check_past_information()
         self.message = json.dumps(self.message) # make it a string to send
 
         # make UDP socket
@@ -71,6 +73,18 @@ class HashTableServer():
         print("Listening on port:", self.port)
         print("Host name:", self.host)
 
+    
+    def check_past_information(self):
+        if os.path.isfile("backup_info.txt"):
+            f = open("backup_info.txt", "r")
+            past_information = f.read()
+            f.close()
+            past_information = past_information.split(":")
+            if int(past_information[0]) ==  len(past_information[1].strip()):
+                self.message['self-id'] = past_information[1].split(".")[1].strip()
+            print(self.message)
+
+
     # connect to catalog to find project nameserver
     def find_nameserver(self):
         nameserver = http.client.HTTPConnection('catalog.cse.nd.edu:9097')
@@ -80,8 +94,9 @@ class HashTableServer():
 
         self.nameservers = [] # list of all possible project nameservers
         for line in data:
-            if line['type'] == 'nameserver' and line['project'] == self.project_name.strip() + "-NS":
-                self.nameservers.append(line)
+            if 'type' and 'project' in line:
+                if line['type'] == 'nameserver' and line['project'] == self.project_name.strip() + "-NS":
+                    self.nameservers.append(line)
         
         # sort nameservers by last heard from
         self.nameservers = sorted(self.nameservers, key = lambda item: item['lastheardfrom'], reverse = True)
@@ -104,12 +119,13 @@ class HashTableServer():
                     data = s.recv(6)
                     data = s.recv(int(data))
                     data = json.loads(data)
-
+ 
                     self.prev = data['prev'].split(":")
                     self.next = data['next'].split(":")
                     self.server_count = data['server_count']
                     self.id = self.server_count - 1
 
+                    #self.write_server_information()
 
                     # give each server an id so you can figure out the keys it"s responsible for
                     self.server_id = self.server_count
@@ -121,7 +137,7 @@ class HashTableServer():
                     print("LOWER KEY1:", self.lower_key, "HIGHER KEY1:", self.higher_key)
 
                     if self.prev and self.next and self.server_count:
-
+                        print(self.prev, self.next)
                         self.ns_hostname = name['name']
                         self.ns_port = name['port']
                         if self.server_count > 1:
@@ -130,6 +146,14 @@ class HashTableServer():
 
                 except Exception as e:
                     print('unable to connect, exception', e)
+
+
+    def write_server_information(self):
+        if not os.path.isfile("backup_info.txt"):
+            f = open("backup_info.txt", "w")
+            server_length = "server_num." + str(self.id)
+            f.write(str(len(server_length)) + ":" + server_length)
+        
 
     def update_chord_circles(self): #updates for fixing total number of servers (for hashing), and update its neighbors previous and next node information 
         msg = {'method':'update_neighbors', 'machine':self.host + ':' + str(self.port), 'type':'prev', 'backup':False} #send the new next its new prev (self)
