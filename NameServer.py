@@ -55,12 +55,14 @@ def check_status(server_list, self_id, direction):
     while not connection_count and test_server != self_id:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
+                print('connecting to', server_list[test_server]['host'])
                 s.connect((server_list[test_server]['host'], server_list[test_server]['port']))
                 msg_len = str(len(str(message)))
                 s.sendall(bytes(msg_len, 'utf-8'))
                 s.sendall(bytes(message, 'utf-8'))
                 data = str(s.recv(1024))
                 live_server = test_server
+                connection_count += 1 # added because it was infinite looping but not really sure !!
                 
             except (socket.timeout, ConnectionRefusedError) as e:
                 dead_server.append(test_server)
@@ -190,7 +192,6 @@ def active_server(project_name):
                 if server_last in dead_server:
                     server_last = data['self-id']
 
-                
                 response = {'change':server_list[live_server]['host']+":"+str(server_list[live_server]['port']), 'direction':data['direction'], 'replace':','.join([str(x) for x in dead_server])}
                 print(response)
             else:

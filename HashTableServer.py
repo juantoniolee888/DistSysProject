@@ -323,8 +323,9 @@ class HashTableServer():
         try:
             received_data = self.send_socket.recv(1024).decode("utf-8")
         except Exception as e:
-            print("get response from server error", e)
-            return json.loads(str({"success":"false", "error":"server communication"}))
+            self.stabilization('next')
+            self.stabilization('prev')
+            self.get_response_from_server()
 
         if len(received_data) > 0:
             found_num = False
@@ -343,7 +344,7 @@ class HashTableServer():
             received_data += self.send_socket.recv(1024).decode('utf-8')
         if len(received_data) >= operation_len:
             return json.loads(received_data[count:])
-
+    
     def decode_json(self, json_data):
         # given json data from the client, decode and call resulting functions
         self.data = json.loads(json_data)
@@ -389,6 +390,7 @@ class HashTableServer():
                         prev_continue = True
                     else:
                         self.lower_key -= self.higher_key-self.lower_key # double number of keys
+                        print('updating keys', self.lower_key, '-', self.higher_key)
                     # pass key to previous
                 else: # self.key_num is too high --> needs to be passed to next
                     # pass key to next
@@ -396,6 +398,7 @@ class HashTableServer():
                         next_continue = True
                     else:
                         self.higher_key += self.higher_key-self.lower_key
+                        print('updating keys', self.lower_key, '-', self.higher_key)
                 if prev_continue:
                     try:
                         self.send_socket.connect((self.prev[0], int(self.prev[1])))
@@ -418,7 +421,7 @@ class HashTableServer():
                             return value
                     except Exception as e:
                         print('could not receive data due to', e)
-                        return {"success":"false", "error":e}
+                        return json.dumps({"success":"false", "error":"server error"})
 
 
         if self.data['method'] == 'insert':
@@ -499,6 +502,7 @@ class HashTableServer():
     # checks if you need to send backup messages
 
     def stabilization(self, direction):
+        print("self.stabilization")
         if direction == 'next':
             if self.next[0] + ":" + str(self.next[1]) == self.host + ":" + str(self.port):
                 return False
@@ -517,13 +521,17 @@ class HashTableServer():
                 try:
                     s.connect((self.ns_hostname, self.ns_port))
                     msg_len = str(len(str(message)))
+                    print("message", message)
                     while len(msg_len) < 6:
                         msg_len = '0' + msg_len
                     s.sendall(bytes(msg_len, 'utf-8'))
                     s.sendall(bytes(message, 'utf-8'))
+                    print("receive?")
                     data = s.recv(6)
+                    print("data pt1", data)
                     data = s.recv(int(data))
                     data = json.loads(data)
+                    print("DATA IN STABILIZATION:", data)
 
                     for server in data['replace'].split(','):
                         if server not in self.responsibilities:
@@ -543,30 +551,37 @@ class HashTableServer():
                     print('unable to connect, exception', e)
                     return False
 
-
-        
-    
     def check_backup(self):
         if self.data['backup']:
             return
         else:
             if self.data['method'] == 'insert' or self.data['method'] == 'remove':
+                print("checking backup")
                 # needs to be backed up on next and prev
                 self.data['backup'] = True
                 str_data = json.dumps(self.data)
                 length = str(len(str_data))
                 self.send_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                # start by sending to next socket
-                if self.stabilization('next'):
+                self.send_socket.settimeout(2)
+                try:
+                    print('attempting next')
+                    self.send_socket.connect((self.next[0], int(self.next[1])))
                     self.send_socket.sendall(bytes(length, 'utf-8') + bytes(str_data, 'utf-8'))
                     #  value = self.get_response_from_server()
                     #  print('VALUE:', value)
                     self.send_socket.close()
+                except Exception:
+                    print("skipping upper backup")
                 
                 self.send_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                if self.stabilization('prev'):
-                    #self.send_socket.connect((self.prev[0], int(self.prev[1])))
+                self.send_socket.settimeout(2)
+                try:
+                    print("sending to previous")
+                    self.send_socket.connect((self.prev[0], int(self.prev[1])))
                     self.send_socket.sendall(bytes(length, 'utf-8') + bytes(str_data, 'utf-8'))
+                    self.send_socket.close()
+                except Exception:
+                    print("skipping lower backup")
               #  value2 = self.get_response_from_server()
               #  print('VALUE2:', value)
                 
