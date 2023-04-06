@@ -60,6 +60,7 @@ class HashTableServer():
         }
 
         self.check_past_information()
+        self.backup_message = self.message
         self.message = json.dumps(self.message) # make it a string to send
 
         # make UDP socket
@@ -82,6 +83,7 @@ class HashTableServer():
             past_information = past_information.split(":")
             if int(past_information[0]) ==  len(past_information[1].strip()):
                 self.message['self-id'] = past_information[1].split(".")[1].strip()
+            self.id = self.message['self-id']
             print(self.message)
 
 
@@ -124,12 +126,16 @@ class HashTableServer():
                     self.next = data['next'].split(":")
                     self.server_count = data['server_count']
                     self.id = self.server_count - 1
+                    try:
+                        self.id = int(self.backup_message['self-id'])
+                    except Exception:
+                        pass
+                    print("SELF.ID", self.id)
 
-                    #self.write_server_information()
+                    self.write_server_information()
 
                     # give each server an id so you can figure out the keys it"s responsible for
-                    self.server_id = self.server_count
-                    self.higher_key = (self.total_keys/self.server_count)*self.server_id
+                    self.higher_key = (self.total_keys/self.server_count)*(self.id+1)
                     self.lower_key = self.higher_key - (self.total_keys/self.server_count)
 
                     self.higher_key = int(self.higher_key)
@@ -348,7 +354,7 @@ class HashTableServer():
     # used to make sure keys are up to date in case of server addition/failure
     def update_keys(self):
         # if there have been no servers lost
-        self.higher_key = (self.total_keys/self.server_count) * self.server_id
+        self.higher_key = (self.total_keys/self.server_count) * (self.id+1)
         self.lower_key = self.higher_key - (self.total_keys/self.server_count)
         self.higher_key = int(self.higher_key)
         self.lower_key = int(self.lower_key)
