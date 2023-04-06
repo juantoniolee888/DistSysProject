@@ -344,7 +344,25 @@ class HashTableServer():
             received_data += self.send_socket.recv(1024).decode('utf-8')
         if len(received_data) >= operation_len:
             return json.loads(received_data[count:])
-    
+
+    # used to make sure keys are up to date in case of server addition/failure
+    def update_keys(self):
+        # if there have been no servers lost
+        self.higher_key = (self.total_keys/self.server_count) * self.server_id
+        self.lower_key = self.higher_key - (self.total_keys/self.server_count)
+        self.higher_key = int(self.higher_key)
+        self.lower_key = int(self.lower_key)
+        
+        if len(self.responsibilities) > 0:
+            print("RESPONSIBILITIES", self.responsibilities)
+            # there is another server you are responsible for
+            for server in self.responsibilities:
+                if server == self.id+1:
+                    self.higher_key += self.higher_key - self.lower_key 
+                elif server == self.id-1:
+                    self.lower_key -= self.higher_key-self.lower_key
+
+
     def decode_json(self, json_data):
         # given json data from the client, decode and call resulting functions
         self.data = json.loads(json_data)
@@ -361,10 +379,7 @@ class HashTableServer():
                 return self.data
 
         # make sure the keys are still right
-        self.higher_key = (self.total_keys/self.server_count) * self.server_id
-        self.lower_key = self.higher_key - (self.total_keys/self.server_count)
-        self.higher_key = int(self.higher_key)
-        self.lower_key = int(self.lower_key)
+        self.update_keys()
         print('updating keys', self.lower_key, '-', self.higher_key)
         
         try:
@@ -389,7 +404,7 @@ class HashTableServer():
                     if self.stabilization('prev'):
                         prev_continue = True
                     else:
-                        self.lower_key -= self.higher_key-self.lower_key # double number of keys
+                        self.update_keys()
                         print('updating keys', self.lower_key, '-', self.higher_key)
                     # pass key to previous
                 else: # self.key_num is too high --> needs to be passed to next
@@ -397,7 +412,7 @@ class HashTableServer():
                     if self.stabilization('next'):
                         next_continue = True
                     else:
-                        self.higher_key += self.higher_key-self.lower_key
+                        self.update_keys()
                         print('updating keys', self.lower_key, '-', self.higher_key)
                 if prev_continue:
                     try:
@@ -557,6 +572,7 @@ class HashTableServer():
         else:
             if self.data['method'] == 'insert' or self.data['method'] == 'remove':
                 print("checking backup")
+                self.update_keys() # in case the keys are wrong
                 # needs to be backed up on next and prev
                 self.data['backup'] = True
                 str_data = json.dumps(self.data)
