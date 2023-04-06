@@ -297,6 +297,9 @@ class HashTableServer():
     def send_result(self):
         # given a result, send that information to the client
         result_len = str(len(self.result))
+        if type(self.result) != str:
+            print("SELF.RESULT", self.result)
+            self.result = json.dumps(self.result)
         try:
             self.current_connection.sendall(bytes(result_len, 'utf-8') + bytes(self.result, 'utf-8'))
         except (BrokenPipeError, ConnectionResetError) as e:
@@ -344,14 +347,17 @@ class HashTableServer():
     def decode_json(self, json_data):
         # given json data from the client, decode and call resulting functions
         self.data = json.loads(json_data)
-        
+        print('self.data', self.data)
+        # if it is a success just continue passing it, if it is server_alive, just ignore
         try:
             if self.data['success']:
                 return self.data
             else:
                 return self.data
         except Exception:
-            pass
+            if self.data['method'] == 'server_alive':
+                self.data['backup'] = True # don't back this up
+                return self.data
 
         # make sure the keys are still right
         self.higher_key = (self.total_keys/self.server_count) * self.server_id
@@ -359,6 +365,12 @@ class HashTableServer():
         self.higher_key = int(self.higher_key)
         self.lower_key = int(self.lower_key)
         print('updating keys', self.lower_key, '-', self.higher_key)
+        
+        try:
+            if self.data['backup']:
+                pass
+        except Exception as e:
+            self.data['backup'] = False
 
         # if method is insert/remove/lookup you need to make sure the key value is correct
         if not self.data['backup'] and (self.data['method'] == 'insert' or self.data['method'] == 'remove' or self.data['method'] == 'lookup'):
@@ -370,29 +382,43 @@ class HashTableServer():
                 length = str(len(json_data))
                 self.send_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.send_socket.settimeout(2)
+                prev_continue = False # if you can send backwards
+                next_continue = False # if you can send forwards
                 if self.key_num < self.lower_key: # needs to be passed to previous
+                    if self.stabilization('prev'):
+                        prev_continue = True
+                    else:
+                        self.lower_key -= self.higher_key-self.lower_key # double number of keys
                     # pass key to previous
-                        try:
-                            self.send_socket.connect((self.prev[0], int(self.prev[1])))
-                        except ConnectionRefusedError as e:
-                            print("TIMEOUT")
                 else: # self.key_num is too high --> needs to be passed to next
                     # pass key to next
+                    if self.stabilization('next'):
+                        next_continue = True
+                    else:
+                        self.higher_key += self.higher_key-self.lower_key
+                if prev_continue:
+                    try:
+                        self.send_socket.connect((self.prev[0], int(self.prev[1])))
+                    except ConnectionRefusedError as e:
+                        print("TIMEOUT")
+                elif next_continue:
                     try:
                         self.send_socket.connect((self.next[0], int(self.next[1])))
                     except ConnectionRefusedError as e:
                         print("TIMEOUT")
-                self.send_socket.sendall(bytes(length, 'utf-8') + bytes(json_data, 'utf-8'))
-                try:
-                    value = self.get_response_from_server()
+                if prev_continue or next_continue:
+                    self.send_socket.sendall(bytes(length, 'utf-8') + bytes(json_data, 'utf-8'))
                     try:
-                        value = json.dumps(value)
-                        return value
+                        value = self.get_response_from_server()
+                        try:
+                            value = json.dumps(value)
+                            return value
+                        except Exception as e:
+                            print('exception', e)
+                            return value
                     except Exception as e:
-                        print('exception', e)
-                        return value
-                except Exception as e:
-                    print('could not receive data due to', e)
+                        print('could not receive data due to', e)
+                        return {"success":"false", "error":e}
 
 
         if self.data['method'] == 'insert':
