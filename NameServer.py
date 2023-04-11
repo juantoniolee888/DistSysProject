@@ -128,7 +128,10 @@ def active_server(project_name):
                             server_prev = server_list[server_list[int(maintaining_server)]['prev']]
                             server_next = server_list[int(maintaining_server)]
    
-                        print("'", server_prev, server_next, '"')
+
+                        
+                        server_prev['next'] = int(data['self-id'])
+                        server_next['prev'] = int(data['self-id'])
                         prev_node = server_prev['host'] + ":" + str(server_prev['port'])
                         next_node = server_next['host'] + ":" + str(server_next['port'])
                         response = {'prev': prev_node, 'next': next_node, 'server_count': server_count}

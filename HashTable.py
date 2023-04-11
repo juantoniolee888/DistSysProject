@@ -47,3 +47,6 @@ class HashTable():
             return values
         else:
             return None
+
+    def return_hash_table(self):
+        return self.hash_table

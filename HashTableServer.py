@@ -27,9 +27,14 @@ class HashTableServer():
         self.server_count = 0
         self.id = -1
         self.responsibilities = []
+        self.restart = False #True if this machine was once in the circle and had disconnected
 
         self.total_keys = 1000
 
+        #If true, these variables will notify the server that their neighbor server needs to be updated on the current keys
+        self.prev_restart = False
+        self.next_restart = False
+        self.restart_number = -1
 
         # set up timer for connecting to nameserver (still want to do 60 sec?)
 #        t = threading.Timer(60.0, self.find_nameserver)
@@ -121,13 +126,14 @@ class HashTableServer():
                     data = s.recv(6)
                     data = s.recv(int(data))
                     data = json.loads(data)
- 
+
                     self.prev = data['prev'].split(":")
                     self.next = data['next'].split(":")
                     self.server_count = data['server_count']
                     self.id = self.server_count - 1
                     try:
                         self.id = int(self.backup_message['self-id'])
+                        self.restart = True
                     except Exception:
                         pass
                     print("SELF.ID", self.id)
@@ -143,7 +149,6 @@ class HashTableServer():
                     print("LOWER KEY1:", self.lower_key, "HIGHER KEY1:", self.higher_key)
 
                     if self.prev and self.next and self.server_count:
-                        print(self.prev, self.next)
                         self.ns_hostname = name['name']
                         self.ns_port = name['port']
                         if self.server_count > 1:
@@ -162,7 +167,7 @@ class HashTableServer():
         
 
     def update_chord_circles(self): #updates for fixing total number of servers (for hashing), and update its neighbors previous and next node information 
-        msg = {'method':'update_neighbors', 'machine':self.host + ':' + str(self.port), 'type':'prev', 'backup':False} #send the new next its new prev (self)
+        msg = {'method':'update_neighbors', 'self-id': self.id, 'machine':self.host + ':' + str(self.port), 'type':'prev', 'backup':False, 'restart':self.restart} #send the new next its new prev
         self.send_update_neighbors_msg(msg)
         msg['type'] = 'next'    #send msg to inform the new previous that this host is its next
         self.send_update_neighbors_msg(msg)
@@ -240,11 +245,44 @@ class HashTableServer():
         except FileNotFoundError:
             pass # there just wasn't a table
 
+    def neighbor_key_update(self):
+        upper_bound_self = int((self.total_keys/self.server_count)*(self.id+1))
+        lower_bound_self = int(upper_bound_self - (self.total_keys/self.server_count))
+
+        upper_bound_neighbor = int((self.total_keys/self.server_count)*(self.restart_number+1))
+        lower_bound_neighbor = int(upper_bound_neighbor - (self.total_keys/self.server_count))
+
+        if self.prev_restart:
+            self.prev_restart = False
+            for key, value in self.hash_table.return_hash_table().items():
+                key_num = self.hash_key(key)
+                if int(key_num) <= upper_bound_self and int(key_num) >= lower_bound_self or int(key_num) <= upper_bound_neighbor and int(key_num) >= lower_bound_neighbor:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        s.settimeout(.1)
+                        try:
+                            s.connect((self.prev[0], int(self.prev[1])))
+                            neighbor_json = {"method":"insert_restart", "key":key, "value":value, "backup":False}
+                            neighbor_len = str(len(str(neighbor_json)))
+                            neighbor_json = json.dumps(neighbor_json)
+                            try:
+                                s.sendall(bytes(neighbor_len, 'utf-8') + bytes(neighbor_json, 'utf-8'))
+                                data = s.recv(1024)
+                            except:
+                                self.prev_restart = True
+                                return False            
+                        except:
+                            self.prev_restart = True
+                            return False            
+
+        if self.next_restart:
+            self.next_restart = False
+        
+
     def receive_from_client(self):
         self.transaction_count = 0 # compact the log every 100 transactions
         self.transaction_id = 0 # no transactions yet
 
-        while True:
+        while True:     
             read_sockets, write_sockets, error_sockets = select.select(self.connections, [], [])
             socket = read_sockets[random.randrange(0, len(read_sockets))]
 
@@ -253,6 +291,10 @@ class HashTableServer():
             else:
                 self.current_connection = socket
                 self.look_for_message()
+
+            if self.prev_restart or self.next_restart:
+                self.neighbor_key_update()
+                
         self.server.close()
 
     # accept new client: called when there is a new client ready to connect
@@ -499,9 +541,17 @@ class HashTableServer():
             if 'machine' in self.data and 'type' in self.data:
                 if self.data['type'] == 'prev':
                     self.prev = self.data['machine'].split(':')
+                    if 'restart' in self.data and self.data['restart']:
+                        self.prev_restart = True
                 elif self.data['type'] == 'next':
                     self.next = self.data['machine'].split(':')
-                json_result = json.dumps({"success":"true"})
+                    if 'restart' in self.data and self.data['restart']:
+                        self.next_restart = True
+                if 'self-id' in self.data:
+                    self.restart_number = int(self.data['self-id'])
+                    if int(self.data['self-id']) in self.responsibilities:
+                        self.responsibilities.remove(int(self.data['self-id']))
+                    json_result = json.dumps({"success":"true"})
             else:
                 json_result = json.dumps({"success":"false", "error":"not correct information"})
         elif self.data['method'] == 'update_server_count':
@@ -511,6 +561,23 @@ class HashTableServer():
                 json_result = json.dumps({"success":"true", "next_machine": self.next[0] + ":" + str(self.next[1])})
             else:
                 json_result = json.dumps({"success":"false", "error":"not correct information"})
+        elif self.data['method'] == 'insert_restart':
+            key = self.data['key']
+            value = self.data['value']
+            result = self.hash_table.insert(key,value)
+            if result == 'inserted': # based on result in the hash table
+                log = open('table.txn', 'a')
+                log.write(json.dumps({'method':'insert', 'key':key,'value':value, 'id':self.transaction_id}))
+                log.write('\n') # to show end of this log value
+                log.flush()
+                os.sync()
+                log.close()
+                json_result = json.dumps({"success":"true", "inserted":"true"})
+            elif result =='key already in table': # does not need to be written to log
+                json_result = json.dumps({"success":"true", "inserted":"false"})
+            else: # result = None
+                json_result = json.dumps({"success":"false", "error":"key already in hash table", "key_title":key})
+
 
         self.transaction_count += 1
         if self.transaction_count >= 100:
