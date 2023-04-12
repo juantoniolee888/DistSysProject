@@ -561,6 +561,12 @@ class HashTableServer():
                 json_result = json.dumps({"success":"true", "next_machine": self.next[0] + ":" + str(self.next[1])})
             else:
                 json_result = json.dumps({"success":"false", "error":"not correct information"})
+        elif self.data['method'] == 'restart_ns':
+            responsibilities_string = ','.join([str(x) for x in self.responsibilities])
+            next_machine = self.next[0] + ":" + str(self.next[1])
+            prev_machine = self.prev[0] + ":" + str(self.prev[1])
+            self_machine = self.host + ":" + str(self.port)
+            json_result = json.dumps({"success":"true", "server_count": self.server_count, "self-id":self.id, "host":self_machine, "next_machine":next_machine, "prev_machine":prev_machine, "responsibilities":responsibilities_string})
         elif self.data['method'] == 'insert_restart':
             key = self.data['key']
             value = self.data['value']
