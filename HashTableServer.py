@@ -127,10 +127,24 @@ class HashTableServer():
                     data = s.recv(int(data))
                     data = json.loads(data)
 
+                    print(data)
+                    if 'success' in data and data['success'] == 'fail':
+                        os.remove('backup_info.txt')
+                        print('Error: NS restart. Restart Program please!')
+                        exit(1)
+
+                    
                     self.prev = data['prev'].split(":")
                     self.next = data['next'].split(":")
                     self.server_count = data['server_count']
                     self.id = self.server_count - 1
+
+                    if 'responsibilities' in data:
+                        if data['responsibilities']:
+                            for x in [int(x) for x in data['responsibilities'].split(',')]:
+                                self.responsibilities.append(x)
+                        print(self.responsibilities)
+
                     try:
                         self.id = int(self.backup_message['self-id'])
                         self.restart = True
@@ -166,8 +180,9 @@ class HashTableServer():
             f.write(str(len(server_length)) + ":" + server_length)
         
 
-    def update_chord_circles(self): #updates for fixing total number of servers (for hashing), and update its neighbors previous and next node information 
-        msg = {'method':'update_neighbors', 'self-id': self.id, 'machine':self.host + ':' + str(self.port), 'type':'prev', 'backup':False, 'restart':self.restart} #send the new next its new prev
+    def update_chord_circles(self): #updates for fixing total number of servers (for hashing), and update its neighbors previous and next node information
+        r = ','.join(str(x) for x in self.responsibilities)
+        msg = {'method':'update_neighbors', 'self-id': self.id, 'machine':self.host + ':' + str(self.port), 'type':'prev', 'backup':False, 'restart':self.restart, 'r':r}
         self.send_update_neighbors_msg(msg)
         msg['type'] = 'next'    #send msg to inform the new previous that this host is its next
         self.send_update_neighbors_msg(msg)
@@ -192,7 +207,7 @@ class HashTableServer():
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
-                s.connect((host, port))
+                s.connect((host, int(port)))
                 result_len = str(len(str(msg)))
                 s.sendall(bytes(result_len, 'utf-8') + bytes(json.dumps(msg), 'utf-8'))
                 data = str(s.recv(1024)).strip("'b")
@@ -538,6 +553,7 @@ class HashTableServer():
             else:
                 json_result = json.dumps({"success":"false", "error":"no matches found"})
         elif self.data['method'] == 'update_neighbors': #fixing previous whenever a new node is accessed
+            print(self.data)
             if 'machine' in self.data and 'type' in self.data:
                 if self.data['type'] == 'prev':
                     self.prev = self.data['machine'].split(':')
@@ -551,6 +567,10 @@ class HashTableServer():
                     self.restart_number = int(self.data['self-id'])
                     if int(self.data['self-id']) in self.responsibilities:
                         self.responsibilities.remove(int(self.data['self-id']))
+                    if self.data['r']:
+                        for i in [int(x) for x in self.data['r'].split(',')]:
+                            if i in self.responsibilities:
+                                self.responsibilities.remove(i)
                     json_result = json.dumps({"success":"true"})
             else:
                 json_result = json.dumps({"success":"false", "error":"not correct information"})
@@ -562,6 +582,8 @@ class HashTableServer():
             else:
                 json_result = json.dumps({"success":"false", "error":"not correct information"})
         elif self.data['method'] == 'restart_ns':
+            self.ns_hostname = self.data['host']
+            self.ns_port = int(self.data['port'])
             responsibilities_string = ','.join([str(x) for x in self.responsibilities])
             next_machine = self.next[0] + ":" + str(self.next[1])
             prev_machine = self.prev[0] + ":" + str(self.prev[1])

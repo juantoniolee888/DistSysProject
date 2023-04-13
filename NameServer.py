@@ -55,7 +55,7 @@ def check_status(server_list, self_id, direction):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
                 print('connecting to', server_list[test_server]['host'])
-                s.connect((server_list[test_server]['host'], server_list[test_server]['port']))
+                s.connect((server_list[test_server]['host'], int(server_list[test_server]['port'])))
                 msg_len = str(len(str(message)))
                 s.sendall(bytes(msg_len, 'utf-8'))
                 s.sendall(bytes(message, 'utf-8'))
@@ -126,7 +126,6 @@ def recursive_chord_search(msg, response, server_list, responsibility_list, mach
         if new_response:
             recursive_chord_search(msg, new_response, server_list, responsibility_list, machine_index_match)
 
-
     if data['prev_machine'] in machine_index_match:
         server_list[machine_index_match[data['prev_machine']]]['next'] = int(data['self-id'])
         server_list[int(data['self-id'])]['prev'] = int(machine_index_match[data['prev_machine']])
@@ -146,8 +145,8 @@ def recursive_chord_search(msg, response, server_list, responsibility_list, mach
 
 
 
-def retrieve_info(server_list, responsibility_list):
-    msg = {"method":"restart_ns", "backup": False}
+def retrieve_info(server_list, responsibility_list, port_number):
+    msg = {"method":"restart_ns", "backup": False, "host":str(socket.gethostname()), "port":str(port_number)}
     if os.path.exists("ns_restart.txt"):
         f = open("ns_restart.txt", "r")
         for line in f.readlines():
@@ -178,12 +177,10 @@ def active_server(project_name):
     server_first = 0
     server_last = 0
 
-    
-
     update_info(project_name, port_number)
     print("Established Port on " + socket.gethostname() + ":" + str(port_number))
 
-    server_count = retrieve_info(server_list, responsibility_list)
+    server_count = retrieve_info(server_list, responsibility_list, port_number)
     if server_count > 0:
         server_last = server_count - 1
 
@@ -203,6 +200,15 @@ def active_server(project_name):
             if data['type'] == 'hashtableserver':
                 if 'self-id' in data:
                     direction = 'next'
+
+                    if int(data['self-id']) not in server_list:
+                        response = {'success': 'fail'}
+                        msg_len = str(len(str(response)))
+                        while len(msg_len) < 6:
+                            msg_len = '0' + msg_len    
+                        clientsocket.sendall(bytes(str(msg_len),'utf-8'))
+                        clientsocket.sendall(bytes(json.dumps(response), 'utf-8'))
+                        continue
 
                     server_list[int(data['self-id'])]['host'] = data['host']
                     server_list[int(data['self-id'])]['port'] = data['port']
@@ -225,32 +231,35 @@ def active_server(project_name):
                             server_list[int(data['self-id'])]['next'] = int(maintaining_server)
                             server_next = server_list[int(maintaining_server)]
    
+
                         server_prev['next'] = int(data['self-id'])
                         server_next['prev'] = int(data['self-id'])
                         prev_node = server_prev['host'] + ":" + str(server_prev['port'])
                         next_node = server_next['host'] + ":" + str(server_next['port'])
                         response = {'prev': prev_node, 'next': next_node, 'server_count': server_count}
 
-
                         responsibility_list[int(data['self-id'])] = int(data['self-id'])
 
                         if take_over_responsibilities:
                             take_over = []
                             for key, value in responsibility_list.items():
-                                if int(value) == int(maintaining_server):
+                                if int(value) == int(maintaining_server) and int(key) != int(value):
                                     take_over.append(key)
                             for key in take_over:
                                 responsibility_list[key] = int(data['self-id'])
                             response['responsibilities'] = ','.join([str(x) for x in take_over])
                     else:
                         if not server_list[int(maintaining_server)]['prev']:
-                            server_list[int(maintaining_server)]['prev'] = responsibility_list[int(data['self-id'])-1]
+                            server_id = 1
+                            while not server_list[int(maintaining_server)]['prev']:
+                                server_list[int(maintaining_server)]['prev'] = responsibility_list[int(data['self-id'])-server_id]
+                                if not server_list[server_list[int(maintaining_server)]['prev']]['host']:
+                                    server_list[int(maintaining_server)]['prev'] = None
+                                    server_id += 1
                             server_list[server_list[int(maintaining_server)]['prev']]['next'] = int(data['self-id'])
 
                             server_list[int(maintaining_server)]['next'] = responsibility_list[(int(data['self-id'])+1)%server_count]
                             server_list[server_list[int(maintaining_server)]['next']]['prev'] = int(data['self-id'])
-                            
-
                         
                         server_prev = server_list[int(maintaining_server)]['prev']
                         server_next = server_list[int(maintaining_server)]['next']
@@ -287,8 +296,9 @@ def active_server(project_name):
                             random_numbers = random.randint(0,server_count-1)  
                             while random_numbers in random_generated:
                                 random_numbers = random.randint(0,server_count-1)
-                            random_generated.append(random_numbers)
-                            response[str(i)] = server_list[random_numbers]['host'] + ":" + str(server_list[random_numbers]['port'])
+                            if server_list[random_numbers]['host']:
+                                random_generated.append(random_numbers)
+                                response[str(i)] = server_list[random_numbers]['host'] + ":" + str(server_list[random_numbers]['port'])
 
             elif data['type'] == 'hashtableserver-neighbor_error':
                 dead_server, live_server = check_status(server_list, data['self-id'], data['direction'])
