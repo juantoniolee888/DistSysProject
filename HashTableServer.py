@@ -411,19 +411,30 @@ class HashTableServer():
     # used to make sure keys are up to date in case of server addition/failure
     def update_keys(self):
         # if there have been no servers lost
-        self.higher_key = (self.total_keys/self.server_count) * (self.id+1)
-        self.lower_key = self.higher_key - (self.total_keys/self.server_count)
+
+        highest_id = self.id
+        lowest_id = self.id
+
+        for i in self.responsibilities:
+            if int(i) > highest_id:
+                highest_id = int(i)
+            if int(i) < lowest_id:
+                lowest_id = int(i)
+
+        self.higher_key = (self.total_keys/self.server_count) * (highest_id+1)
+        self.lower_key = (self.total_keys/self.server_count) * (lowest_id)
+
         self.higher_key = int(self.higher_key)
         self.lower_key = int(self.lower_key)
         
-        if len(self.responsibilities) > 0:
-            print("RESPONSIBILITIES", self.responsibilities)
+        #if len(self.responsibilities) > 0:
+            #print("RESPONSIBILITIES", self.responsibilities)
             # there is another server you are responsible for
-            for server in self.responsibilities:
-                if server == self.id+1:
-                    self.higher_key += self.higher_key - self.lower_key 
-                elif server == self.id-1:
-                    self.lower_key -= self.higher_key-self.lower_key
+            #for server in self.responsibilities:
+                #if server == self.id+1:
+                    #self.higher_key += self.higher_key - self.lower_key 
+                #elif server == self.id-1:
+                    #self.lower_key -= self.higher_key-self.lower_key
 
 
     def decode_json(self, json_data):
@@ -502,6 +513,7 @@ class HashTableServer():
                         return json.dumps({"success":"false", "error":"server error"})
 
 
+        print(self.responsibilities)
         if self.data['method'] == 'insert':
             key = self.data['key']
             value = self.data['value']
@@ -578,6 +590,7 @@ class HashTableServer():
             if 'count' in self.data and 'type' in self.data:
                 if int(self.data['count']) > self.server_count:
                     self.server_count = int(self.data['count'])
+                    self.update_keys()
                 json_result = json.dumps({"success":"true", "next_machine": self.next[0] + ":" + str(self.next[1])})
             else:
                 json_result = json.dumps({"success":"false", "error":"not correct information"})

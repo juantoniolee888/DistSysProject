@@ -43,7 +43,7 @@ def setup_port():
     server_socket.listen(5)
     return (server_socket, port_number)
 
-def check_status(server_list, self_id, direction):
+def check_status(server_list, self_id, direction, responsibilities):
     connection_count = 0
     test_server = server_list[self_id][direction]
 
@@ -65,10 +65,20 @@ def check_status(server_list, self_id, direction):
                 
             except (socket.timeout, ConnectionRefusedError) as e:
                 dead_server.append(test_server)
+                for key, value in responsibilities.items():
+                    if int(value) == test_server and int(key) not in dead_server:
+                        dead_server.append(int(key))
                 test_server = server_list[test_server][direction]
+        print(responsibilities)
+        print(dead_server)
 
     if live_server == -1:
         live_server = self_id
+
+    for element in dead_server:
+        responsibilities[int(element)] = int(live_server)
+
+
     return dead_server, live_server
                 
 def save_current_servers(current_servers):
@@ -301,7 +311,7 @@ def active_server(project_name):
                                 response[str(i)] = server_list[random_numbers]['host'] + ":" + str(server_list[random_numbers]['port'])
 
             elif data['type'] == 'hashtableserver-neighbor_error':
-                dead_server, live_server = check_status(server_list, data['self-id'], data['direction'])
+                dead_server, live_server = check_status(server_list, data['self-id'], data['direction'], responsibility_list)
                 for server in dead_server:
                     responsibility_list[server] = data['self-id']
                 server_list[data['self-id']][data['direction']] = live_server
