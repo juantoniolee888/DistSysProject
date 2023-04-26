@@ -5,7 +5,7 @@ import time
 import random
 
 sys.path.append("..")
-from HashTableClient import *
+from Admin import *
 
 def main():
     if len(sys.argv) != 2:

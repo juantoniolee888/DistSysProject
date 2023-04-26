@@ -1,4 +1,0 @@
-{"method": "insert", "key": "1000000", "value": {"name": "fred"}, "id": 2}
-{"method": "insert", "key": "keyagain", "value": {"name": "fred"}, "id": 3}
-{"method": "remove", "key": "1000000", "id": 4}
-{"method": "remove", "key": "keyagain", "id": 5}
